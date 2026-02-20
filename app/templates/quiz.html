@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block title %}Quiz — 错题本{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="page-header">
+        <h1 class="page-title">🧠 Quiz Mode</h1>
+        <p class="page-subtitle">Test yourself on your mistakes</p>
+    </div>
+
+    <!-- Quiz Setup -->
+    <div id="quiz-setup" class="card">
+        <div class="card-header">📋 Quiz Settings</div>
+        <div class="grid grid-2 gap-16">
+            <div class="form-group">
+                <label class="form-label">Mode</label>
+                <select id="quiz-mode" class="form-select">
+                    <option value="original">📖 Quiz me originally (use original questions)</option>
+                    <option value="generated">🆕 Quiz me in a new way (AI-generated)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Number of Questions</label>
+                <select id="quiz-count" class="form-select">
+                    <option value="3">3</option>
+                    <option value="5" selected>5</option>
+                    <option value="10">10</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Subject Filter</label>
+                <select id="quiz-subject" class="form-select">
+                    <option value="">All Subjects</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Status Filter</label>
+                <select id="quiz-status" class="form-select">
+                    <option value="">All</option>
+                    <option value="UNSOLVED">Unsolved Only</option>
+                    <option value="SOLVED">Solved Only</option>
+                </select>
+            </div>
+        </div>
+        <button class="btn btn-primary mt-16" onclick="startQuiz()">🚀 Start Quiz</button>
+    </div>
+
+    <!-- Quiz Active -->
+    <div id="quiz-active" class="hidden">
+        <div class="flex-between mb-16">
+            <span id="quiz-progress" class="form-label"></span>
+            <span id="quiz-score" class="form-label"></span>
+        </div>
+
+        <div class="card" id="quiz-question-card">
+            <div id="quiz-question-text" style="font-size: 1.1rem; margin-bottom: 16px;"></div>
+            <div id="quiz-question-image" class="mb-16"></div>
+            <div class="form-group">
+                <label class="form-label">Your Answer</label>
+                <textarea id="quiz-answer" class="form-textarea" rows="3"
+                    placeholder="Type your answer here..."></textarea>
+            </div>
+            <button class="btn btn-primary" onclick="submitAnswer()">Submit Answer</button>
+        </div>
+
+        <div id="quiz-feedback" class="card mt-16 hidden">
+            <div id="feedback-result"></div>
+            <div id="feedback-explanation" class="mt-8" style="color: var(--text-secondary);"></div>
+            <button class="btn btn-primary mt-16" onclick="nextQuestion()">Next Question →</button>
+        </div>
+    </div>
+
+    <!-- Quiz Complete -->
+    <div id="quiz-complete" class="hidden">
+        <div class="card" style="text-align: center;">
+            <div style="font-size: 3rem; margin-bottom: 16px;">🎉</div>
+            <h2 id="final-score" style="font-size: 1.5rem; margin-bottom: 8px;"></h2>
+            <p id="final-message" style="color: var(--text-secondary);"></p>
+            <button class="btn btn-primary mt-16" onclick="resetQuiz()">Take Another Quiz</button>
+        </div>
+    </div>
+
+    <!-- Quiz History -->
+    <div class="card mt-24">
+        <div class="card-header">📊 Recent Quiz Sessions</div>
+        <div id="quiz-history"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let quizSession = null;
+    let currentQuestionIdx = 0;
+
+    async function startQuiz() {
+        const filters = {};
+        const subj = document.getElementById('quiz-subject').value;
+        if (subj) filters.subject_id = subj;
+        const status = document.getElementById('quiz-status').value;
+        if (status) filters.status = status;
+
+        showLoading('Generating quiz...');
+        const resp = await api('/api/quiz/start', {
+            method: 'POST',
+            body: {
+                mode: document.getElementById('quiz-mode').value,
+                count: parseInt(document.getElementById('quiz-count').value),
+                filters,
+            },
+        });
+        hideLoading();
+
+        if (!resp) return;
+        const data = await resp.json();
+
+        if (resp.ok) {
+            quizSession = data;
+            currentQuestionIdx = 0;
+            document.getElementById('quiz-setup').classList.add('hidden');
+            document.getElementById('quiz-active').classList.remove('hidden');
+            showQuestion();
+        } else {
+            showToast(data.error || 'Failed to start quiz', 'error');
+        }
+    }
+
+    function showQuestion() {
+        if (currentQuestionIdx >= quizSession.questions.length) {
+            finishQuiz();
+            return;
+        }
+
+        const q = quizSession.questions[currentQuestionIdx];
+        document.getElementById('quiz-progress').textContent = `Question ${currentQuestionIdx + 1} of ${quizSession.questions.length}`;
+        document.getElementById('quiz-score').textContent = `Score: ${quizSession.score}`;
+        document.getElementById('quiz-question-text').textContent = q.question_text;
+
+        const imgEl = document.getElementById('quiz-question-image');
+        if (q.question_image_path) {
+            imgEl.innerHTML = `<img src="/uploads/${q.question_image_path}" class="mistake-card-image">`;
+        } else {
+            imgEl.innerHTML = '';
+        }
+
+        document.getElementById('quiz-answer').value = '';
+        document.getElementById('quiz-feedback').classList.add('hidden');
+    }
+
+    async function submitAnswer() {
+        const q = quizSession.questions[currentQuestionIdx];
+        const answer = document.getElementById('quiz-answer').value.trim();
+        if (!answer) { showToast('Please enter an answer', 'warning'); return; }
+
+        const resp = await api(`/api/quiz/${quizSession.id}/answer`, {
+            method: 'POST',
+            body: { question_id: q.id, answer },
+        });
+
+        if (!resp) return;
+        const data = await resp.json();
+
+        quizSession.score = data.score;
+        document.getElementById('quiz-score').textContent = `Score: ${data.score}`;
+
+        const feedback = document.getElementById('quiz-feedback');
+        feedback.classList.remove('hidden');
+
+        const resultEl = document.getElementById('feedback-result');
+        if (data.is_correct) {
+            resultEl.innerHTML = '<span style="color: var(--success); font-size: 1.2rem;">✅ Correct!</span>';
+        } else {
+            resultEl.innerHTML = `<span style="color: var(--danger); font-size: 1.2rem;">❌ Incorrect</span>
+            ${q.reference_answer ? `<div class="mt-8"><strong>Reference answer:</strong> ${escapeHtml(q.reference_answer)}</div>` : ''}`;
+        }
+        document.getElementById('feedback-explanation').textContent = data.explanation || '';
+    }
+
+    function nextQuestion() {
+        currentQuestionIdx++;
+        showQuestion();
+    }
+
+    function finishQuiz() {
+        document.getElementById('quiz-active').classList.add('hidden');
+        document.getElementById('quiz-complete').classList.remove('hidden');
+        document.getElementById('final-score').textContent = `${quizSession.score} / ${quizSession.questions.length}`;
+        const pct = quizSession.questions.length > 0 ? (quizSession.score / quizSession.questions.length * 100).toFixed(0) : 0;
+        document.getElementById('final-message').textContent = pct >= 80 ? 'Excellent work! 🌟' : pct >= 60 ? 'Good effort! Keep practicing. 💪' : 'Keep studying! You\'ll improve. 📚';
+        loadHistory();
+    }
+
+    function resetQuiz() {
+        document.getElementById('quiz-setup').classList.remove('hidden');
+        document.getElementById('quiz-complete').classList.add('hidden');
+        quizSession = null;
+    }
+
+    async function loadHistory() {
+        const data = await apiJson('/api/quiz/sessions');
+        if (!data) return;
+        const el = document.getElementById('quiz-history');
+        if (data.sessions.length === 0) {
+            el.innerHTML = '<p class="empty-state-text">No quiz sessions yet.</p>';
+            return;
+        }
+        el.innerHTML = `<table class="data-table">
+        <thead><tr><th>Date</th><th>Mode</th><th>Score</th></tr></thead>
+        <tbody>${data.sessions.map(s => `
+            <tr><td>${formatDateTime(s.created_at)}</td><td>${s.mode}</td><td>${s.score} / ${s.total}</td></tr>
+        `).join('')}</tbody>
+    </table>`;
+    }
+
+    // Load subjects
+    (async () => {
+        const data = await apiJson('/api/subjects');
+        if (data && data.subjects) {
+            const sel = document.getElementById('quiz-subject');
+            data.subjects.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.textContent = s.name;
+                sel.appendChild(opt);
+            });
+        }
+        loadHistory();
+    })();
+</script>
+{% endblock %}

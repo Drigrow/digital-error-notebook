@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Note Detail — 错题本{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="page-header flex-between">
+        <div>
+            <h1 class="page-title" id="note-title">Loading...</h1>
+            <p class="page-subtitle" id="note-meta"></p>
+        </div>
+        <div class="flex gap-8">
+            <button class="btn btn-secondary" onclick="toggleEdit()">✏️ Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteNote()">🗑️ Delete</button>
+        </div>
+    </div>
+
+    <div id="note-view">
+        <div class="flex gap-8 mb-16">
+            <span id="note-status" class="badge"></span>
+            <span id="note-subject" class="tag" style="display: none;"></span>
+            <div id="note-tags" class="flex gap-4"></div>
+        </div>
+
+        <!-- Mistake items -->
+        <div id="mistakes-view" class="mb-16"></div>
+
+        <!-- Markdown content -->
+        <div class="card">
+            <div class="card-header">📝 Notes</div>
+            <div id="note-content" class="md-content"></div>
+        </div>
+    </div>
+
+    <!-- Edit form -->
+    <div id="note-edit" class="hidden">
+        <div class="card mb-16">
+            <div class="form-group">
+                <label class="form-label">Title</label>
+                <input type="text" id="edit-title" class="form-input">
+            </div>
+            <div class="flex gap-16">
+                <div class="form-group" style="flex: 1;">
+                    <label class="form-label">Subject</label>
+                    <input type="text" id="edit-subject" class="form-input">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label class="form-label">Status</label>
+                    <select id="edit-status" class="form-select">
+                        <option value="UNSOLVED">UNSOLVED</option>
+                        <option value="SOLVED">SOLVED</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Tags (comma-separated)</label>
+                <input type="text" id="edit-tags" class="form-input">
+            </div>
+        </div>
+
+        <div class="card mb-16">
+            <div class="card-header">📝 Content (Markdown)</div>
+            <textarea id="edit-md"></textarea>
+        </div>
+
+        <div class="flex gap-8">
+            <button class="btn btn-primary" onclick="saveEdit()">💾 Save Changes</button>
+            <button class="btn btn-secondary" onclick="toggleEdit()">Cancel</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+    const noteId = {{ note_id }};
+    let noteData = null;
+    let editMDE = null;
+    let isEditing = false;
+
+    async function loadNote() {
+        noteData = await apiJson(`/api/notes/${noteId}`);
+        if (!noteData) return;
+
+        document.getElementById('note-title').textContent = noteData.title;
+        document.getElementById('note-meta').textContent = `Created: ${formatDateTime(noteData.created_at)} · Updated: ${formatDateTime(noteData.updated_at)}`;
+
+        const statusEl = document.getElementById('note-status');
+        statusEl.textContent = noteData.status;
+        statusEl.className = `badge ${noteData.status === 'SOLVED' ? 'badge-solved' : 'badge-unsolved'}`;
+
+        const subjEl = document.getElementById('note-subject');
+        if (noteData.subject) {
+            subjEl.textContent = `📖 ${noteData.subject}`;
+            subjEl.style.display = '';
+        }
+
+        document.getElementById('note-tags').innerHTML = noteData.tags.map(t =>
+            `<span class="tag">${escapeHtml(t)}</span>`
+        ).join('');
+
+        // Render mistakes
+        const mistakesView = document.getElementById('mistakes-view');
+        if (noteData.mistake_items.length > 0) {
+            mistakesView.innerHTML = noteData.mistake_items.map((m, i) => `
+            <div class="mistake-card">
+                <div class="flex-between mb-8">
+                    <span style="font-weight: 600;">Mistake #${i + 1}</span>
+                    <span class="badge ${m.status === 'SOLVED' ? 'badge-solved' : 'badge-unsolved'}">${m.status}</span>
+                </div>
+                <div class="grid grid-2 gap-16">
+                    <div>
+                        ${m.crop_image_path ? `<img src="/uploads/${m.crop_image_path}" class="mistake-card-image">` : ''}
+                        ${m.correction_image_path ? `<img src="/uploads/${m.correction_image_path}" class="mistake-card-image mt-8" style="max-height: 150px;">` : ''}
+                    </div>
+                    <div>
+                        <p><strong>Question:</strong> ${escapeHtml(m.ocr_question)}</p>
+                        ${m.ocr_answer ? `<p><strong>Answer:</strong> ${escapeHtml(m.ocr_answer)}</p>` : ''}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+        }
+
+        // Render markdown
+        document.getElementById('note-content').innerHTML = marked.parse(noteData.content_md || '*No content*');
+    }
+
+    function toggleEdit() {
+        isEditing = !isEditing;
+        document.getElementById('note-view').classList.toggle('hidden', isEditing);
+        document.getElementById('note-edit').classList.toggle('hidden', !isEditing);
+
+        if (isEditing && noteData) {
+            document.getElementById('edit-title').value = noteData.title;
+            document.getElementById('edit-subject').value = noteData.subject || '';
+            document.getElementById('edit-status').value = noteData.status;
+            document.getElementById('edit-tags').value = noteData.tags.join(', ');
+
+            if (!editMDE) {
+                editMDE = new EasyMDE({
+                    element: document.getElementById('edit-md'),
+                    spellChecker: false,
+                    minHeight: '200px',
+                    status: false,
+                });
+            }
+            editMDE.value(noteData.content_md || '');
+        }
+    }
+
+    async function saveEdit() {
+        const tagsStr = document.getElementById('edit-tags').value;
+        const tags = tagsStr.split(',').map(t => t.trim()).filter(t => t);
+
+        const body = {
+            title: document.getElementById('edit-title').value,
+            subject: document.getElementById('edit-subject').value,
+            status: document.getElementById('edit-status').value,
+            tags: tags,
+            content_md: editMDE.value(),
+        };
+
+        const resp = await api(`/api/notes/${noteId}`, { method: 'PUT', body });
+        if (resp && resp.ok) {
+            showToast('Note updated!', 'success');
+            isEditing = false;
+            document.getElementById('note-view').classList.remove('hidden');
+            document.getElementById('note-edit').classList.add('hidden');
+            loadNote();
+        } else {
+            showToast('Update failed', 'error');
+        }
+    }
+
+    async function deleteNote() {
+        if (!confirmAction('Delete this note? This cannot be undone.')) return;
+        const resp = await api(`/api/notes/${noteId}`, { method: 'DELETE' });
+        if (resp && resp.ok) {
+            showToast('Note deleted', 'success');
+            setTimeout(() => window.location.href = '/notebook', 800);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadNote);
+</script>
+{% endblock %}

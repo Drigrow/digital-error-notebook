@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Profile — 错题本{% endblock %}
+{% block content %}
+<div class="main-content" style="max-width: 600px;">
+    <div class="page-header">
+        <h1 class="page-title">👤 Profile</h1>
+        <p class="page-subtitle">Manage your account and API key</p>
+    </div>
+
+    <div class="card mb-16">
+        <div class="card-header">Account Info</div>
+        <p><strong>Username:</strong> <span id="p-username"></span></p>
+        <p><strong>Email:</strong> <span id="p-email"></span></p>
+        <p><strong>Member since:</strong> <span id="p-created"></span></p>
+    </div>
+
+    <div class="card mb-16">
+        <div class="card-header">🔑 OpenRouter API Key</div>
+        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 12px;">
+            Providing your own key unlocks all models. Without it, you'll have access to limited models only.
+        </p>
+        <div class="form-group">
+            <label class="form-label">API Key</label>
+            <input type="password" id="api-key-input" class="form-input" placeholder="sk-or-v1-...">
+        </div>
+        <p id="key-status" style="font-size: 0.82rem; margin-bottom: 12px;"></p>
+        <div class="flex gap-8">
+            <button class="btn btn-primary btn-sm" onclick="saveApiKey()">Save Key</button>
+            <button class="btn btn-danger btn-sm" onclick="removeApiKey()">Remove Key</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">📊 Quota Status</div>
+        <div class="grid grid-3 gap-16 mt-8">
+            <div style="text-align: center;">
+                <div id="q-chat" style="font-size: 1.5rem; font-weight: 700; color: var(--accent);"></div>
+                <div style="font-size: 0.8rem; color: var(--text-muted);">Chats</div>
+            </div>
+            <div style="text-align: center;">
+                <div id="q-images" style="font-size: 1.5rem; font-weight: 700; color: var(--accent);"></div>
+                <div style="font-size: 0.8rem; color: var(--text-muted);">Images</div>
+            </div>
+            <div style="text-align: center;">
+                <div id="q-quizzes" style="font-size: 1.5rem; font-weight: 700; color: var(--accent);"></div>
+                <div style="font-size: 0.8rem; color: var(--text-muted);">Quizzes</div>
+            </div>
+        </div>
+        <p style="text-align: center; font-size: 0.78rem; color: var(--text-muted); margin-top: 12px;">Quotas refresh
+            every 6 hours.</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (async () => {
+        const data = await apiJson('/auth/me');
+        if (!data) return;
+
+        document.getElementById('p-username').textContent = data.user.username;
+        document.getElementById('p-email').textContent = data.user.email;
+        document.getElementById('p-created').textContent = '—';
+
+        document.getElementById('key-status').innerHTML = data.user.has_api_key
+            ? '<span style="color: var(--success);">✅ Key configured — all models available</span>'
+            : '<span style="color: var(--text-muted);">⚠️ No key — using limited models</span>';
+
+        document.getElementById('q-chat').textContent = data.quota.remaining_chat;
+        document.getElementById('q-images').textContent = data.quota.remaining_images;
+        document.getElementById('q-quizzes').textContent = data.quota.remaining_quizzes;
+    })();
+
+    async function saveApiKey() {
+        const key = document.getElementById('api-key-input').value.trim();
+        if (!key) { showToast('Enter an API key', 'warning'); return; }
+        const resp = await api('/auth/api-key', { method: 'PUT', body: { api_key: key } });
+        if (resp && resp.ok) {
+            showToast('API key saved!', 'success');
+            document.getElementById('key-status').innerHTML = '<span style="color: var(--success);">✅ Key configured</span>';
+            document.getElementById('api-key-input').value = '';
+        }
+    }
+
+    async function removeApiKey() {
+        const resp = await api('/auth/api-key', { method: 'PUT', body: { api_key: '' } });
+        if (resp && resp.ok) {
+            showToast('API key removed', 'info');
+            document.getElementById('key-status').innerHTML = '<span style="color: var(--text-muted);">⚠️ No key — using limited models</span>';
+        }
+    }
+</script>
+{% endblock %}

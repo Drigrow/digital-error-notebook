@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+{% block title %}Chat — 错题本{% endblock %}
+
+{% block content %}
+<div class="chat-layout">
+    <!-- Sidebar -->
+    <div class="chat-sidebar">
+        <div class="chat-sidebar-header">
+            <button class="btn btn-primary btn-sm" style="width: 100%; justify-content: center;"
+                onclick="createThread()">
+                ＋ New Chat
+            </button>
+        </div>
+        <div class="chat-thread-list" id="thread-list"></div>
+
+        <!-- Note selector for context -->
+        <div style="padding: 12px; border-top: 1px solid var(--border);">
+            <label class="form-label" style="font-size: 0.78rem;">📌 Notes as Context</label>
+            <select id="note-selector" class="form-select" multiple style="min-height: 80px; font-size: 0.78rem;">
+            </select>
+            <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
+                Hold Ctrl to select multiple. Leave empty for AUTO mode.
+            </div>
+        </div>
+
+        <!-- Model selector -->
+        <div style="padding: 12px; border-top: 1px solid var(--border);">
+            <label class="form-label" style="font-size: 0.78rem;">🤖 Model</label>
+            <select id="chat-model" class="form-select" style="font-size: 0.78rem;"></select>
+        </div>
+    </div>
+
+    <!-- Main chat -->
+    <div class="chat-main">
+        <div class="chat-messages" id="chat-messages">
+            <div class="empty-state" id="chat-empty">
+                <div class="empty-state-icon">💬</div>
+                <p class="empty-state-text">Select or create a chat thread to get started</p>
+            </div>
+        </div>
+
+        <div class="chat-input-bar" id="chat-input-bar" style="display: none;">
+            <div class="chat-input-wrapper">
+                <textarea class="chat-input" id="chat-input" placeholder="Type a message..." rows="1"
+                    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}"></textarea>
+                <button class="btn btn-primary" onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+    let activeThreadId = null;
+
+    // ── Thread Management ──
+    async function loadThreads() {
+        const data = await apiJson('/api/chat/threads');
+        if (!data) return;
+        const list = document.getElementById('thread-list');
+        list.innerHTML = data.threads.map(t => `
+        <div class="chat-thread-item ${t.id === activeThreadId ? 'active' : ''}"
+             onclick="selectThread(${t.id})">
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(t.title)}</span>
+            <button class="btn-icon" style="padding: 2px 4px; font-size: 0.7rem; border: none;"
+                    onclick="event.stopPropagation(); deleteThread(${t.id})">✕</button>
+        </div>
+    `).join('');
+    }
+
+    async function createThread() {
+        const resp = await api('/api/chat/threads', { method: 'POST', body: {} });
+        if (!resp) return;
+        const data = await resp.json();
+        activeThreadId = data.id;
+        loadThreads();
+        loadMessages();
+    }
+
+    async function deleteThread(id) {
+        if (!confirmAction('Delete this chat?')) return;
+        await api(`/api/chat/threads/${id}`, { method: 'DELETE' });
+        if (activeThreadId === id) { activeThreadId = null; }
+        loadThreads();
+        document.getElementById('chat-messages').innerHTML = '<div class="empty-state" id="chat-empty"><div class="empty-state-icon">💬</div><p class="empty-state-text">Select or create a chat thread</p></div>';
+        document.getElementById('chat-input-bar').style.display = 'none';
+    }
+
+    async function selectThread(id) {
+        activeThreadId = id;
+        loadThreads();
+        loadMessages();
+    }
+
+    // ── Messages ──
+    async function loadMessages() {
+        if (!activeThreadId) return;
+        document.getElementById('chat-input-bar').style.display = '';
+        const data = await apiJson(`/api/chat/threads/${activeThreadId}/messages`);
+        if (!data) return;
+
+        const container = document.getElementById('chat-messages');
+        if (!data.messages || data.messages.length === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💬</div><p class="empty-state-text">Start the conversation!</p></div>';
+            return;
+        }
+
+        container.innerHTML = data.messages.map(m => renderMessage(m)).join('');
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function renderMessage(m) {
+        const content = m.role === 'assistant' ? marked.parse(m.content) : escapeHtml(m.content);
+        const actions = m.role === 'user' ? `
+        <div class="chat-message-actions">
+            <button class="btn-icon" style="font-size: 0.7rem; padding: 2px 6px;" onclick="editMessage(${m.id})">✏️</button>
+        </div>
+    ` : `
+        <div class="chat-message-actions">
+            <button class="btn-icon" style="font-size: 0.7rem; padding: 2px 6px;" onclick="copyToClipboard(\`${m.content.replace(/`/g, '\\`').replace(/\\/g, '\\\\')}\`)">📋</button>
+            <button class="btn-icon" style="font-size: 0.7rem; padding: 2px 6px;" onclick="regenerate()">🔄</button>
+        </div>
+    `;
+
+        return `<div class="chat-message ${m.role}" data-id="${m.id}">${content}${actions}</div>`;
+    }
+
+    async function sendMessage() {
+        if (!activeThreadId) return;
+        const input = document.getElementById('chat-input');
+        const content = input.value.trim();
+        if (!content) return;
+
+        // Get selected note IDs
+        const noteSelect = document.getElementById('note-selector');
+        const noteIds = Array.from(noteSelect.selectedOptions).map(o => parseInt(o.value));
+
+        // Show user message immediately
+        const container = document.getElementById('chat-messages');
+        const emptyState = container.querySelector('.empty-state');
+        if (emptyState) emptyState.remove();
+        container.innerHTML += `<div class="chat-message user">${escapeHtml(content)}</div>`;
+        container.innerHTML += `<div class="chat-message assistant" id="streaming-msg"><div class="spinner" style="width: 20px; height: 20px;"></div></div>`;
+        container.scrollTop = container.scrollHeight;
+        input.value = '';
+
+        // Stream response
+        const model = document.getElementById('chat-model').value;
+        const resp = await fetch(`/api/chat/threads/${activeThreadId}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ content, model, note_ids: noteIds, stream: true }),
+        });
+
+        if (resp.status === 429) {
+            document.getElementById('streaming-msg').innerHTML = '<em style="color: var(--warning);">Quota exhausted</em>';
+            return;
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+
+        const streamEl = document.getElementById('streaming-msg');
+        streamEl.innerHTML = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const dataStr = line.slice(6).trim();
+                    if (dataStr === '[DONE]') break;
+                    try {
+                        const data = JSON.parse(dataStr);
+                        if (data.content) {
+                            fullText += data.content;
+                            streamEl.innerHTML = marked.parse(fullText);
+                            container.scrollTop = container.scrollHeight;
+                        }
+                        if (data.error) {
+                            streamEl.innerHTML += `<div style="color: var(--danger);">Error: ${data.error}</div>`;
+                        }
+                    } catch { }
+                }
+            }
+        }
+
+        // Add action buttons after streaming completes
+        streamEl.innerHTML += `
+        <div class="chat-message-actions" style="display: flex;">
+            <button class="btn-icon" style="font-size: 0.7rem; padding: 2px 6px;" onclick="copyToClipboard(\`${fullText.replace(/`/g, '\\`').replace(/\\/g, '\\\\')}\`)">📋</button>
+            <button class="btn-icon" style="font-size: 0.7rem; padding: 2px 6px;" onclick="regenerate()">🔄</button>
+        </div>
+    `;
+
+        loadThreads();  // Refresh thread title
+    }
+
+    async function editMessage(msgId) {
+        const newContent = prompt('Edit your message:');
+        if (!newContent) return;
+
+        await api(`/api/chat/threads/${activeThreadId}/messages/${msgId}`, {
+            method: 'PUT', body: { content: newContent },
+        });
+        loadMessages();
+    }
+
+    async function regenerate() {
+        const model = document.getElementById('chat-model').value;
+        const noteSelect = document.getElementById('note-selector');
+        const noteIds = Array.from(noteSelect.selectedOptions).map(o => parseInt(o.value));
+
+        const container = document.getElementById('chat-messages');
+        // Remove last assistant message visually
+        const assistantMsgs = container.querySelectorAll('.chat-message.assistant');
+        if (assistantMsgs.length > 0) {
+            const last = assistantMsgs[assistantMsgs.length - 1];
+            last.id = 'streaming-msg';
+            last.innerHTML = '<div class="spinner" style="width: 20px; height: 20px;"></div>';
+        }
+
+        const resp = await fetch(`/api/chat/threads/${activeThreadId}/regenerate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ model, note_ids: noteIds }),
+        });
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        const streamEl = document.getElementById('streaming-msg');
+        streamEl.innerHTML = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const dataStr = line.slice(6).trim();
+                    if (dataStr === '[DONE]') break;
+                    try {
+                        const data = JSON.parse(dataStr);
+                        if (data.content) {
+                            fullText += data.content;
+                            streamEl.innerHTML = marked.parse(fullText);
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    } catch { }
+                }
+            }
+        }
+        streamEl.removeAttribute('id');
+    }
+
+    // ── Init ──
+    (async () => {
+        loadThreads();
+
+        // Load chat models
+        const models = await apiJson('/api/models/chat');
+        if (models && models.models) {
+            const sel = document.getElementById('chat-model');
+            models.models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.id;
+                opt.textContent = m.name;
+                sel.appendChild(opt);
+            });
+        }
+
+        // Load notes for context selector
+        const notes = await apiJson('/api/notes?per_page=100');
+        if (notes && notes.notes) {
+            const sel = document.getElementById('note-selector');
+            notes.notes.forEach(n => {
+                const opt = document.createElement('option');
+                opt.value = n.id;
+                opt.textContent = `${n.title} (${n.subject || 'N/A'})`;
+                sel.appendChild(opt);
+            });
+        }
+    })();
+</script>
+{% endblock %}

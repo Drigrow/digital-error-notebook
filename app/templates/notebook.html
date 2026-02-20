@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}My Notebook — 错题本{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="page-header flex-between">
+        <div>
+            <h1 class="page-title">📚 My Notebook</h1>
+            <p class="page-subtitle">Browse and review your saved mistakes</p>
+        </div>
+        <a href="/upload" class="btn btn-primary">📤 New Upload</a>
+    </div>
+
+    <!-- Filters -->
+    <div class="filter-bar">
+        <input type="text" id="filter-search" class="form-input" placeholder="🔍 Search notes..."
+            oninput="debouncedSearch()">
+        <select id="filter-subject" class="form-select" onchange="loadNotes()">
+            <option value="">All Subjects</option>
+        </select>
+        <select id="filter-status" class="form-select" onchange="loadNotes()">
+            <option value="">All Status</option>
+            <option value="SOLVED">✅ Solved</option>
+            <option value="UNSOLVED">❌ Unsolved</option>
+        </select>
+        <input type="date" id="filter-from" class="form-input" onchange="loadNotes()" style="min-width: 140px;">
+        <input type="date" id="filter-to" class="form-input" onchange="loadNotes()" style="min-width: 140px;">
+    </div>
+
+    <!-- Notes grid -->
+    <div id="notes-grid" class="grid grid-3"></div>
+
+    <div id="empty-state" class="empty-state hidden">
+        <div class="empty-state-icon">📭</div>
+        <p class="empty-state-text">No notes yet. <a href="/upload" style="color: var(--accent);">Upload your first
+                mistake!</a></p>
+    </div>
+
+    <!-- Pagination -->
+    <div id="pagination" class="flex-center mt-24 gap-8"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentPage = 1;
+    const debouncedSearch = debounce(() => { currentPage = 1; loadNotes(); }, 400);
+
+    async function loadNotes() {
+        const params = new URLSearchParams();
+        params.set('page', currentPage);
+        params.set('per_page', 12);
+
+        const q = document.getElementById('filter-search').value;
+        if (q) params.set('q', q);
+
+        const subj = document.getElementById('filter-subject').value;
+        if (subj) params.set('subject_id', subj);
+
+        const status = document.getElementById('filter-status').value;
+        if (status) params.set('status', status);
+
+        const from = document.getElementById('filter-from').value;
+        if (from) params.set('date_from', from);
+
+        const to = document.getElementById('filter-to').value;
+        if (to) params.set('date_to', to);
+
+        const data = await apiJson(`/api/notes?${params}`);
+        if (!data) return;
+
+        const grid = document.getElementById('notes-grid');
+        const empty = document.getElementById('empty-state');
+
+        if (data.notes.length === 0) {
+            grid.innerHTML = '';
+            empty.classList.remove('hidden');
+        } else {
+            empty.classList.add('hidden');
+            grid.innerHTML = data.notes.map(n => `
+            <div class="note-card" onclick="window.location.href='/note/${n.id}'">
+                <div class="flex-between">
+                    <span class="note-card-title">${escapeHtml(n.title)}</span>
+                    <span class="badge ${n.status === 'SOLVED' ? 'badge-solved' : 'badge-unsolved'}">${n.status}</span>
+                </div>
+                <div class="note-card-meta">
+                    ${n.subject ? `<span>📖 ${escapeHtml(n.subject)}</span>` : ''}
+                    <span>📅 ${formatDate(n.created_at)}</span>
+                    <span>📝 ${n.mistake_items.length} item(s)</span>
+                </div>
+                <div class="note-card-tags">
+                    ${n.tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}
+                </div>
+            </div>
+        `).join('');
+        }
+
+        // Pagination
+        const pag = document.getElementById('pagination');
+        if (data.pages > 1) {
+            let btns = '';
+            for (let p = 1; p <= data.pages; p++) {
+                btns += `<button class="btn btn-sm ${p === data.page ? 'btn-primary' : 'btn-secondary'}" onclick="goPage(${p})">${p}</button>`;
+            }
+            pag.innerHTML = btns;
+        } else {
+            pag.innerHTML = '';
+        }
+    }
+
+    function goPage(p) { currentPage = p; loadNotes(); }
+
+    // Load subjects for filter
+    async function loadSubjects() {
+        const data = await apiJson('/api/subjects');
+        if (data && data.subjects) {
+            const sel = document.getElementById('filter-subject');
+            data.subjects.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.textContent = s.name;
+                sel.appendChild(opt);
+            });
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadSubjects();
+        loadNotes();
+    });
+</script>
+{% endblock %}

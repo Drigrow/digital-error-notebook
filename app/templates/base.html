@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Digital Error Notebook — AI-powered homework mistake tracker for Chinese students">
+    <title>{% block title %}错题本 | Digital Error Notebook{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- EasyMDE Markdown Editor -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    {% if current_user.is_authenticated %}
+    <nav class="navbar">
+        <a href="/notebook" class="navbar-brand">
+            <span>📝</span> 错题本
+        </a>
+        <ul class="navbar-nav">
+            <li><a href="/notebook">📚 Notebook</a></li>
+            <li><a href="/upload">📤 Upload</a></li>
+            <li><a href="/quiz">🧠 Quiz</a></li>
+            <li><a href="/chat">💬 Chat</a></li>
+            {% if current_user.is_admin %}
+            <li><a href="/admin">⚙️ Admin</a></li>
+            {% endif %}
+        </ul>
+        <div class="navbar-right">
+            <div id="quota-warnings"></div>
+            <a href="/profile" class="btn btn-sm btn-secondary">👤 {{ current_user.username }}</a>
+            <button onclick="logout()" class="btn btn-sm btn-secondary">Logout</button>
+        </div>
+    </nav>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+
+    <script src="{{ url_for('static', filename='js/common.js') }}"></script>
+    <script>
+        async function logout() {
+            await api('/auth/logout', { method: 'POST' });
+            window.location.href = '/login';
+        }
+        {% if current_user.is_authenticated %}
+        checkQuotaWarnings().then(data => {
+            if (data && data.warnings && data.warnings.length > 0) {
+                const el = document.getElementById('quota-warnings');
+                if (el) {
+                    el.innerHTML = data.warnings.map(w =>
+                        `<span class="quota-warning">⚠️ ${escapeHtml(w)}</span>`
+                    ).join('');
+                }
+            }
+        });
+        {% endif %}
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

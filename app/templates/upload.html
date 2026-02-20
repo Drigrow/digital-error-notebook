@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Upload — 错题本{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="page-header">
+        <h1 class="page-title">📤 Upload Homework</h1>
+        <p class="page-subtitle">Upload teacher-corrected papers for mistake detection</p>
+    </div>
+
+    <div class="warning-banner">
+        ⚠️ Upload the teacher-corrected version (with 勾/叉 marks) for best results.
+    </div>
+
+    <div class="card mb-16">
+        <div class="flex-between mb-16">
+            <div class="form-group" style="margin-bottom: 0; flex: 0 0 auto;">
+                <label class="form-label">Vision Model</label>
+                <select id="model-select" class="form-select" style="min-width: 280px;"></select>
+            </div>
+        </div>
+
+        <div id="upload-zone" class="upload-zone" onclick="document.getElementById('file-input').click()">
+            <div class="upload-zone-icon">📷</div>
+            <div class="upload-zone-text">
+                Click or drag photos here<br>
+                <small>Supports JPG, PNG, WEBP — up to 32 MB total</small>
+            </div>
+        </div>
+        <input type="file" id="file-input" multiple accept="image/*" style="display: none;"
+            onchange="handleFiles(this.files)">
+
+        <div id="preview-area" class="grid grid-3 mt-16 hidden"></div>
+
+        <div class="mt-16 flex-between">
+            <span id="file-count" class="form-label"></span>
+            <button id="analyze-btn" class="btn btn-primary hidden" onclick="analyzeImages()">
+                🔍 Analyze for Mistakes
+            </button>
+        </div>
+
+        <div id="progress-wrapper" class="mt-16 hidden">
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-bar-fill" style="width: 0%"></div>
+            </div>
+            <p id="progress-text" class="form-label mt-8">Analyzing...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let selectedFiles = [];
+
+    // Drag and drop
+    const zone = document.getElementById('upload-zone');
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+    zone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        zone.classList.remove('dragover');
+        handleFiles(e.dataTransfer.files);
+    });
+
+    function handleFiles(files) {
+        selectedFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+        const preview = document.getElementById('preview-area');
+        const count = document.getElementById('file-count');
+        const btn = document.getElementById('analyze-btn');
+
+        if (selectedFiles.length === 0) return;
+
+        preview.innerHTML = '';
+        preview.classList.remove('hidden');
+        btn.classList.remove('hidden');
+        count.textContent = `${selectedFiles.length} image(s) selected`;
+
+        selectedFiles.forEach((file, i) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const div = document.createElement('div');
+                div.style.position = 'relative';
+                div.innerHTML = `
+                <img src="${e.target.result}" style="width: 100%; height: 160px; object-fit: cover; border-radius: var(--radius-md);">
+                <button onclick="removeFile(${i})" class="btn-icon" style="position: absolute; top: 4px; right: 4px; font-size: 0.7rem;">✕</button>
+                <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">${file.name}</div>
+            `;
+                preview.appendChild(div);
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    function removeFile(index) {
+        selectedFiles.splice(index, 1);
+        handleFiles(selectedFiles);
+        if (selectedFiles.length === 0) {
+            document.getElementById('preview-area').classList.add('hidden');
+            document.getElementById('analyze-btn').classList.add('hidden');
+            document.getElementById('file-count').textContent = '';
+        }
+    }
+
+    async function analyzeImages() {
+        if (selectedFiles.length === 0) return;
+
+        const model = document.getElementById('model-select').value;
+        const formData = new FormData();
+        selectedFiles.forEach(f => formData.append('images', f));
+        formData.append('model', model);
+
+        const progress = document.getElementById('progress-wrapper');
+        const fill = document.getElementById('progress-fill');
+        const text = document.getElementById('progress-text');
+        progress.classList.remove('hidden');
+        document.getElementById('analyze-btn').disabled = true;
+
+        // Simulate progress
+        let pct = 0;
+        const interval = setInterval(() => {
+            pct = Math.min(pct + Math.random() * 8, 90);
+            fill.style.width = pct + '%';
+        }, 800);
+
+        text.textContent = 'Detecting mistakes... This may take a moment.';
+
+        const resp = await api('/api/upload', { method: 'POST', body: formData });
+        clearInterval(interval);
+        fill.style.width = '100%';
+
+        if (!resp) {
+            text.textContent = 'Upload failed.';
+            document.getElementById('analyze-btn').disabled = false;
+            return;
+        }
+
+        const data = await resp.json();
+        if (resp.ok && data.mistakes) {
+            // Store results in sessionStorage and redirect to review
+            sessionStorage.setItem('upload_result', JSON.stringify(data));
+            text.textContent = `Found ${data.mistakes.length} mistake(s). Redirecting to review...`;
+            setTimeout(() => window.location.href = '/review', 1000);
+        } else {
+            text.textContent = data.error || data.message || 'No mistakes found.';
+            document.getElementById('analyze-btn').disabled = false;
+            if (data.message) showToast(data.message, 'info');
+        }
+    }
+
+    // Load models
+    (async () => {
+        const data = await apiJson('/api/models/vision');
+        if (data && data.models) {
+            const sel = document.getElementById('model-select');
+            data.models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.id;
+                opt.textContent = m.name;
+                sel.appendChild(opt);
+            });
+        }
+    })();
+</script>
+{% endblock %}

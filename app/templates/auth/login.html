@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — 错题本</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <h1 class="auth-title">📝 错题本</h1>
+            <p class="auth-subtitle">Digital Error Notebook</p>
+
+            <div id="error-msg" class="warning-banner hidden"></div>
+
+            <form id="login-form" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label class="form-label">Username</label>
+                    <input type="text" id="username" class="form-input" placeholder="Enter username" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input type="password" id="password" class="form-input" placeholder="Enter password" required>
+                </div>
+                <button type="submit" class="btn btn-primary"
+                    style="width: 100%; justify-content: center; margin-top: 8px;">
+                    Login
+                </button>
+            </form>
+
+            <p style="text-align: center; margin-top: 16px; color: var(--text-secondary); font-size: 0.85rem;">
+                Don't have an account? <a href="/register" style="color: var(--accent);">Register</a>
+            </p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/common.js') }}"></script>
+    <script>
+        async function handleLogin(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errEl = document.getElementById('error-msg');
+
+            const resp = await api('/auth/login', {
+                method: 'POST',
+                body: { username, password },
+            });
+
+            if (!resp) return;
+            const data = await resp.json();
+
+            if (resp.ok) {
+                window.location.href = '/notebook';
+            } else {
+                errEl.textContent = data.error || 'Login failed';
+                errEl.classList.remove('hidden');
+            }
+        }
+    </script>
+</body>
+
+</html>

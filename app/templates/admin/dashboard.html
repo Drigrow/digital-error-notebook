@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Admin Panel — 错题本{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="page-header">
+        <h1 class="page-title">⚙️ Admin Panel</h1>
+        <p class="page-subtitle">Manage users and quotas</p>
+    </div>
+
+    <div class="card">
+        <div class="card-header">👥 Users</div>
+        <table class="data-table" id="users-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>API Key</th>
+                    <th>Chat</th>
+                    <th>Images</th>
+                    <th>Quizzes</th>
+                    <th>Max Chat</th>
+                    <th>Max Img</th>
+                    <th>Max Quiz</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="users-body"></tbody>
+        </table>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="quota-modal" class="modal-backdrop hidden" onclick="if(event.target===this)closeModal()">
+        <div class="modal">
+            <h3 class="modal-title">Edit Quota — <span id="modal-username"></span></h3>
+            <input type="hidden" id="modal-user-id">
+            <div class="grid grid-2 gap-16">
+                <div class="form-group">
+                    <label class="form-label">Max Chat</label>
+                    <input type="number" id="m-max-chat" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Remaining Chat</label>
+                    <input type="number" id="m-rem-chat" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Max Images</label>
+                    <input type="number" id="m-max-img" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Remaining Images</label>
+                    <input type="number" id="m-rem-img" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Max Quizzes</label>
+                    <input type="number" id="m-max-quiz" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Remaining Quizzes</label>
+                    <input type="number" id="m-rem-quiz" class="form-input">
+                </div>
+                <div class="form-group" style="grid-column: span 2;">
+                    <label class="form-label">Refresh Interval (hours)</label>
+                    <input type="number" id="m-refresh" class="form-input" value="6">
+                </div>
+            </div>
+            <div class="flex gap-8 mt-16">
+                <button class="btn btn-primary" onclick="saveQuota()">Save</button>
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function loadUsers() {
+        const data = await apiJson('/admin/users');
+        if (!data) return;
+
+        const tbody = document.getElementById('users-body');
+        tbody.innerHTML = data.users.map(u => {
+            const q = u.quota || {};
+            return `<tr>
+            <td>${u.id}</td>
+            <td>${escapeHtml(u.username)} ${u.is_admin ? '<span class="badge badge-warning" style="font-size: 0.65rem;">ADMIN</span>' : ''}</td>
+            <td>${escapeHtml(u.email)}</td>
+            <td>${u.has_api_key ? '✅' : '—'}</td>
+            <td>${q.remaining_chat ?? '—'}</td>
+            <td>${q.remaining_images ?? '—'}</td>
+            <td>${q.remaining_quizzes ?? '—'}</td>
+            <td>${q.max_chat ?? '—'}</td>
+            <td>${q.max_images ?? '—'}</td>
+            <td>${q.max_quizzes ?? '—'}</td>
+            <td><button class="btn btn-sm btn-secondary" onclick='openModal(${JSON.stringify(u)})'>Edit</button></td>
+        </tr>`;
+        }).join('');
+    }
+
+    function openModal(user) {
+        document.getElementById('quota-modal').classList.remove('hidden');
+        document.getElementById('modal-username').textContent = user.username;
+        document.getElementById('modal-user-id').value = user.id;
+        const q = user.quota || {};
+        document.getElementById('m-max-chat').value = q.max_chat || 50;
+        document.getElementById('m-rem-chat').value = q.remaining_chat || 0;
+        document.getElementById('m-max-img').value = q.max_images || 20;
+        document.getElementById('m-rem-img').value = q.remaining_images || 0;
+        document.getElementById('m-max-quiz').value = q.max_quizzes || 10;
+        document.getElementById('m-rem-quiz').value = q.remaining_quizzes || 0;
+        document.getElementById('m-refresh').value = q.refresh_interval_hours || 6;
+    }
+
+    function closeModal() {
+        document.getElementById('quota-modal').classList.add('hidden');
+    }
+
+    async function saveQuota() {
+        const userId = document.getElementById('modal-user-id').value;
+        const body = {
+            max_chat: parseInt(document.getElementById('m-max-chat').value),
+            remaining_chat: parseInt(document.getElementById('m-rem-chat').value),
+            max_images: parseInt(document.getElementById('m-max-img').value),
+            remaining_images: parseInt(document.getElementById('m-rem-img').value),
+            max_quizzes: parseInt(document.getElementById('m-max-quiz').value),
+            remaining_quizzes: parseInt(document.getElementById('m-rem-quiz').value),
+            refresh_interval_hours: parseInt(document.getElementById('m-refresh').value),
+        };
+
+        const resp = await api(`/admin/users/${userId}/quota`, { method: 'PUT', body });
+        if (resp && resp.ok) {
+            showToast('Quota updated!', 'success');
+            closeModal();
+            loadUsers();
+        } else {
+            showToast('Update failed', 'error');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadUsers);
+</script>
+{% endblock %}

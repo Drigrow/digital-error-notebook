@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Review Mistakes — 错题本{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="page-header">
+        <h1 class="page-title">🔍 Review Mistakes</h1>
+        <p class="page-subtitle">Verify and edit detected mistakes before saving</p>
+    </div>
+
+    <div id="no-data" class="empty-state hidden">
+        <div class="empty-state-icon">📭</div>
+        <p class="empty-state-text">No upload results found. <a href="/upload" style="color: var(--accent);">Upload
+                images first</a>.</p>
+    </div>
+
+    <div id="review-container">
+        <!-- Suggestion bar -->
+        <div class="card mb-16" id="suggestion-bar">
+            <div class="flex gap-16" style="flex-wrap: wrap;">
+                <div class="form-group" style="flex: 1; min-width: 200px;">
+                    <label class="form-label">Subject</label>
+                    <input type="text" id="subject-input" class="form-input" placeholder="e.g., 数学">
+                </div>
+                <div class="form-group" style="flex: 2; min-width: 300px;">
+                    <label class="form-label">Tags (comma-separated)</label>
+                    <input type="text" id="tags-input" class="form-input" placeholder="e.g., 二次方程, 几何">
+                </div>
+                <div class="form-group" style="flex: 1; min-width: 200px;">
+                    <label class="form-label">Note Title</label>
+                    <input type="text" id="title-input" class="form-input" placeholder="Untitled">
+                </div>
+            </div>
+        </div>
+
+        <!-- Mistake items -->
+        <div id="mistakes-list"></div>
+
+        <!-- Markdown editor -->
+        <div class="card mt-16">
+            <div class="card-header">📝 Note Content (Markdown)</div>
+            <textarea id="md-editor"></textarea>
+        </div>
+
+        <div class="flex-between mt-16">
+            <a href="/upload" class="btn btn-secondary">← Back to Upload</a>
+            <button id="save-btn" class="btn btn-primary" onclick="saveNote()">💾 Save Note</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>
+<script>
+    let uploadResult = null;
+    let easyMDE = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const raw = sessionStorage.getItem('upload_result');
+        if (!raw) {
+            document.getElementById('no-data').classList.remove('hidden');
+            document.getElementById('review-container').classList.add('hidden');
+            return;
+        }
+
+        uploadResult = JSON.parse(raw);
+
+        // Fill suggestions
+        if (uploadResult.suggested_subject) {
+            document.getElementById('subject-input').value = uploadResult.suggested_subject;
+        }
+        if (uploadResult.suggested_tags) {
+            document.getElementById('tags-input').value = uploadResult.suggested_tags.join(', ');
+        }
+
+        // Render mistake items
+        const list = document.getElementById('mistakes-list');
+        uploadResult.mistakes.forEach((m, i) => {
+            const card = document.createElement('div');
+            card.className = `mistake-card ${m.needs_user_edit ? 'needs-edit' : ''}`;
+            card.innerHTML = `
+            <div class="flex-between mb-8">
+                <span class="card-header" style="margin-bottom: 0;">Mistake #${i + 1}</span>
+                <div class="flex gap-8">
+                    <span class="badge ${m.status === 'SOLVED' ? 'badge-solved' : 'badge-unsolved'}">${m.status}</span>
+                    ${m.needs_user_edit ? '<span class="badge badge-warning">Needs Edit</span>' : ''}
+                    <span style="font-size: 0.78rem; color: var(--text-muted);">Confidence: ${(m.confidence * 100).toFixed(0)}%</span>
+                </div>
+            </div>
+            <div class="grid grid-2 gap-16">
+                <div>
+                    ${m.crop_image_path ? `<img src="/uploads/${m.crop_image_path}" class="mistake-card-image" alt="Crop">` : '<div class="empty-state" style="padding: 24px;"><p>No crop image</p></div>'}
+                    ${m.correction_image_path ? `<img src="/uploads/${m.correction_image_path}" class="mistake-card-image mt-8" alt="Correction" style="max-height: 150px;">` : ''}
+                </div>
+                <div>
+                    <div class="form-group">
+                        <label class="form-label">Question Text</label>
+                        <textarea class="form-textarea" id="q-${i}" rows="3">${escapeHtml(m.ocr_question)}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Answer / Correction Text</label>
+                        <textarea class="form-textarea" id="a-${i}" rows="2">${escapeHtml(m.ocr_answer || m.correction_text || '')}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Status</label>
+                        <select class="form-select" id="s-${i}">
+                            <option value="UNSOLVED" ${m.status === 'UNSOLVED' ? 'selected' : ''}>UNSOLVED</option>
+                            <option value="SOLVED" ${m.status === 'SOLVED' ? 'selected' : ''}>SOLVED</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        `;
+            list.appendChild(card);
+        });
+
+        // Init Markdown editor
+        easyMDE = new EasyMDE({
+            element: document.getElementById('md-editor'),
+            placeholder: 'Add notes about these mistakes...',
+            spellChecker: false,
+            minHeight: '150px',
+            status: false,
+        });
+
+        // Auto-generate markdown content from mistakes
+        let autoContent = uploadResult.mistakes.map((m, i) =>
+            `## Mistake ${i + 1}\n\n**Question:** ${m.ocr_question || 'N/A'}\n\n**Answer:** ${m.ocr_answer || m.correction_text || 'N/A'}\n\n**Status:** ${m.status}\n\n---`
+        ).join('\n\n');
+        easyMDE.value(autoContent);
+    });
+
+    async function saveNote() {
+        const mistakes = uploadResult.mistakes.map((m, i) => ({
+            ...m,
+            ocr_question: document.getElementById(`q-${i}`).value,
+            ocr_answer: document.getElementById(`a-${i}`).value,
+            status: document.getElementById(`s-${i}`).value,
+        }));
+
+        const tagsStr = document.getElementById('tags-input').value;
+        const tags = tagsStr.split(',').map(t => t.trim()).filter(t => t);
+
+        const noteData = {
+            title: document.getElementById('title-input').value || 'Untitled',
+            subject: document.getElementById('subject-input').value,
+            tags: tags,
+            content_md: easyMDE.value(),
+            status: mistakes.some(m => m.status === 'UNSOLVED') ? 'UNSOLVED' : 'SOLVED',
+            mistake_items: mistakes,
+        };
+
+        const resp = await api('/api/notes', { method: 'POST', body: noteData });
+        if (!resp) return;
+        const data = await resp.json();
+
+        if (resp.ok) {
+            sessionStorage.removeItem('upload_result');
+            showToast('Note saved!', 'success');
+            setTimeout(() => window.location.href = `/note/${data.id}`, 1000);
+        } else {
+            showToast(data.error || 'Save failed', 'error');
+        }
+    }
+</script>
+{% endblock %}

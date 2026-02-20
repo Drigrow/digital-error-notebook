@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register — 错题本</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <h1 class="auth-title">📝 Create Account</h1>
+            <p class="auth-subtitle">Start tracking your mistakes</p>
+
+            <div id="error-msg" class="warning-banner hidden"></div>
+
+            <form id="register-form" onsubmit="handleRegister(event)">
+                <div class="form-group">
+                    <label class="form-label">Username</label>
+                    <input type="text" id="username" class="form-input" placeholder="Choose a username" required
+                        autofocus>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Email</label>
+                    <input type="email" id="email" class="form-input" placeholder="you@example.com" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input type="password" id="password" class="form-input" placeholder="At least 6 characters" required
+                        minlength="6">
+                </div>
+                <button type="submit" class="btn btn-primary"
+                    style="width: 100%; justify-content: center; margin-top: 8px;">
+                    Register
+                </button>
+            </form>
+
+            <p style="text-align: center; margin-top: 16px; color: var(--text-secondary); font-size: 0.85rem;">
+                Already have an account? <a href="/login" style="color: var(--accent);">Login</a>
+            </p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/common.js') }}"></script>
+    <script>
+        async function handleRegister(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const errEl = document.getElementById('error-msg');
+
+            const resp = await api('/auth/register', {
+                method: 'POST',
+                body: { username, email, password },
+            });
+
+            if (!resp) return;
+            const data = await resp.json();
+
+            if (resp.ok) {
+                window.location.href = '/notebook';
+            } else {
+                errEl.textContent = data.error || 'Registration failed';
+                errEl.classList.remove('hidden');
+            }
+        }
+    </script>
+</body>
+
+</html>
